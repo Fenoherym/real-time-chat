@@ -1,17 +1,25 @@
 <?php
 
-use App\Http\Controllers\ProfileController;
+use App\Models\User;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ProfileController;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
 Route::get('/dashboard', function () {
-    return view('dashboard');
+    return view('dashboard', [
+       "users" => User::where('id', '!=', auth()->id())->get(),
+    ]);
 })->middleware(['auth', 'verified'])->name('dashboard');
 
+
 Route::middleware('auth')->group(function () {
+    Route::get('/chat-message/{receiver_id}', [ChatController::class, 'index'])->name('chat.index');
+    Route::get('/chat/{friend_id}', [ChatController::class, 'get'])->name('chat.get');
+    Route::post('/chat', [ChatController::class, 'store'])->name('chat.store');
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');

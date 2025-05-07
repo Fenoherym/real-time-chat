@@ -19,14 +19,14 @@
                 <!-- Zone de messages -->
                 <div class="h-[500px] overflow-y-auto p-4 space-y-4" ref="messageContainer">
                     <div v-for="message in messages" :key="message.id" 
-                         :class="message.isMe ? 'flex justify-end' : 'flex justify-start'">
+                         :class="message.sender_id === current_user.id ? 'flex justify-end' : 'flex justify-start'">
                         <div :class="[
                             'max-w-[70%] rounded-lg px-4 py-2 relative',
-                            message.isMe ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'
+                            message.sender_id === current_user.id ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'
                         ]">
-                            <p class="text-sm">{{ message.content }}</p>
-                            <div class="flex items-center justify-end gap-1 mt-1">
-                                <p class="text-xs" :class="message.isMe ? 'text-blue-100' : 'text-gray-500'">
+                            <p class="text-sm">{{ message.message }}</p>
+                            <div class="flex items-center justify-end gap-1 mt-2">
+                                <p class="text-xs" :class="message.sender_id === current_user.id ? 'text-blue-100' : 'text-gray-500'">
                                     {{ message.time }}
                                 </p>
                                 <!-- Status indicators pour mes messages -->
@@ -73,34 +73,59 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watchEffect } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
+import axios from 'axios'
+import Echo from 'laravel-echo';
+
+
+const props = defineProps({
+    current_user: {
+        type: Object,
+        required: true
+    },
+    receiver_id: {
+        type: Number,
+        required: true
+    }
+})
+
+
+
+// Séparer la fonction de fetch
+const fetchMessages = async () => {
+    try {
+        const response = await fetch('/chat/1')        
+        if (!response.ok) {
+            throw new Error('Network response was not ok')
+        }        
+        return response.json()
+    } catch (error) {
+        throw new Error('Error fetching messages: ' + error.message)
+    }
+}
+
+
+
+
+
+// Utilisation correcte de useQuery
+const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['messages'],
+    queryFn: fetchMessages,
+})
 
 const newMessage = ref('')
 const messageContainer = ref(null)
+const messages = ref([])
 
-// Messages avec uniquement 2 participants
-const messages = ref([
-    {
-        id: 1,
-        content: 'Hi John! Are you available for a quick chat?',
-        time: '10:00',
-        isMe: true,
-        status: 'read'
-    },
-    {
-        id: 2,
-        content: 'Yes, of course! What\'s on your mind?',
-        time: '10:01',
-        isMe: false
-    },
-    {
-        id: 3,
-        content: 'I wanted to discuss the new project',
-        time: '10:02',
-        isMe: true,
-        status: 'delivered'
+// Observer les changements de data
+watchEffect(() => {
+    if (data.value) {
+        messages.value = data.value.messages 
+    
     }
-])
+})
 
 const scrollToBottom = async () => {
     await nextTick()
@@ -109,34 +134,45 @@ const scrollToBottom = async () => {
 
 const sendMessage = async () => {
     if (newMessage.value.trim()) {
-        const message = {
-            id: Date.now(),
-            content: newMessage.value,
-            time: new Date().toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            }),
-            isMe: true,
-            status: 'sent'
+        console.log('Sending message to:', props.receiver_id);
+        
+        try {
+            const response = await axios.post('/chat', {
+                message: newMessage.value,            
+                receiver_id: props.receiver_id
+            });
+            
+            console.log('Message sent response:', response.data);
+            messages.value = [...messages.value, response.data.message];
+        } catch (error) {
+            console.error('Error sending message:', error);
         }
-        
-        messages.value.push(message)
-        newMessage.value = ''
-        await scrollToBottom()
-        
-        // Simuler la livraison et la lecture du message
-        setTimeout(() => {
-            message.status = 'delivered'
-        }, 2000)
-        
-        setTimeout(() => {
-            message.status = 'read'
-        }, 4000)
-    }
+
+        newMessage.value = '';
+        await scrollToBottom();     
+    }   
 }
 
 onMounted(() => {
     scrollToBottom()
+    console.log('Component mounted, attempting to connect to channel:', `chat.${props.current_user.id}`)
+    
+    const channel = window.Echo.private(`chat.${props.current_user.id}`)
+    
+    // Log quand la connexion au canal est réussie
+    channel.subscribed(() => {
+        console.log('Successfully subscribed to channel:', `chat.${props.current_user.id}`)
+    })
+    
+    // Log en cas d'erreur de connexion
+    channel.error((error) => {
+        console.error('Channel subscription error:', error)
+    })
+    
+    channel.listen('MessageSent', (e) => {
+        console.log('Event received:', e)
+        messages.value = [...messages.value, e.message]
+        console.log('Updated messages:', messages.value)
+    })
 })
 </script>
